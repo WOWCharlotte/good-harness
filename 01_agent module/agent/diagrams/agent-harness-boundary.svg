@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Agent 与 Harness 职责边界</title>
+  <desc id="desc">展示 Agent 负责判断与行动，Harness 负责制度、工具、权限、状态和验证。</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #334155; stroke-width: 2; rx: 16; }
+      .agent { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; rx: 14; }
+      .harness { fill: #fef3c7; stroke: #d97706; stroke-width: 2; rx: 14; }
+      .world { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; rx: 14; }
+      .text { font-family: Arial, "Microsoft YaHei", sans-serif; fill: #0f172a; font-size: 18px; }
+      .small { font-size: 15px; fill: #334155; }
+      .title { font-size: 24px; font-weight: 700; }
+      .arrow { stroke: #475569; stroke-width: 2.5; marker-end: url(#arrow); fill: none; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="960" height="420"/>
+  <text class="text title" x="36" y="44">Agent 与 Harness 的职责边界</text>
+  <rect class="agent" x="50" y="92" width="250" height="240"/>
+  <text class="text title" x="82" y="132">Agent</text>
+  <text class="text small" x="82" y="168">理解目标</text>
+  <text class="text small" x="82" y="198">选择下一步</text>
+  <text class="text small" x="82" y="228">调用工具</text>
+  <text class="text small" x="82" y="258">解释反馈</text>
+  <text class="text small" x="82" y="288">总结结果</text>
+  <rect class="harness" x="355" y="76" width="280" height="272"/>
+  <text class="text title" x="392" y="116">Harness</text>
+  <text class="text small" x="392" y="152">目标 / 完成标准</text>
+  <text class="text small" x="392" y="182">上下文 / 记忆</text>
+  <text class="text small" x="392" y="212">工具 Schema / Runtime</text>
+  <text class="text small" x="392" y="242">权限 / 沙箱 / 网关</text>
+  <text class="text small" x="392" y="272">验证 / 状态 / 审计</text>
+  <text class="text small" x="392" y="302">多 Agent 调度</text>
+  <rect class="world" x="700" y="92" width="210" height="240"/>
+  <text class="text title" x="742" y="132">World</text>
+  <text class="text small" x="742" y="168">文件系统</text>
+  <text class="text small" x="742" y="198">Shell / API</text>
+  <text class="text small" x="742" y="228">浏览器 / UI</text>
+  <text class="text small" x="742" y="258">消息平台</text>
+  <text class="text small" x="742" y="288">测试 / 评测</text>
+  <path class="arrow" d="M300 210 C326 210 329 210 355 210"/>
+  <path class="arrow" d="M635 210 C664 210 671 210 700 210"/>
+  <path class="arrow" d="M700 310 C570 395 395 395 300 310"/>
+  <text class="text small" x="318" y="197">请求行动</text>
+  <text class="text small" x="645" y="197">受控执行</text>
+  <text class="text small" x="442" y="388">结果、错误、日志、评测信号回流</text>
+</svg>
