@@ -6,9 +6,10 @@
 
 然而，当这个角色交给 AI Agent 时，问题变得棘手起来。
 
-**第一个挑战是注意力的边界**。模型的上下文窗口虽然动辄十几万甚至上百万 token，但研究表明，随着上下文长度的增加，模型对早期信息的关注度会显著下降。这不是模型变笨了，而是"信号噪声比"在下降——无关信息稀释了真正重要的上下文。
+**第一个挑战是注意力的边界**。模型的上下文窗口虽然动辄十几万甚至上百万 token，但研究表明，随着上下文长度的增加，模型对早期信息的关注度会显著下降。这不是模型变笨了，而是"信噪比"在下降——无关信息稀释了真正重要的上下文。
 
 **第二个挑战是上下文的"腐烂"**。在 Agent 执行任务的过程中，每一次工具调用、每一个 grep 结果、每一次文件读取，都会在上下文中留下残留。[上下文退化(Context Rot)](https://www.trychroma.com/research/context-rot)随之发生：关键信息被稀释、检索质量下降、推理质量降低。
+
 ![Context Rot](./images/context_rot.png)
 
 **第三个挑战是成本**。上下文窗口就是金钱——更长的上下文意味着更高的 API 调用成本、更慢的推理速度、更有限的并发能力。在生产环境中，这意味着有限的吞吐量和高昂的运维成本。
@@ -49,7 +50,7 @@ Harness 中的上下文架构由两部分组成：
 | 部分 | 作用 |
 |------|-----------|
 | **模块化提示词加载** | 动态维护上下文环境 |
-| **四级压缩管线** | 持续清理和压缩上下文环境 |
+| **上下文压缩** | 持续清理和压缩上下文环境 |
 
 这套架构的最终目标是：**找到最小的高信噪比的Tokens，最大化预期输出**
 
@@ -57,7 +58,7 @@ Harness 中的上下文架构由两部分组成：
 
 ### 2.1 模块化提示词加载
 
-模块化提示词加载是上下文架构中的重要组成部分，它的作用是动态维护上下文环境。它决定了哪些信息被选取、被加载。
+模块化提示词加载是上下文架构中的重要组成部分，它的作用是动态维护上下文环境。它决定了哪些信息被选取、被加载。这一步的关键是**哪些提示词应该被加载？**
 
 #### 2.1.1 提示词组成
 
@@ -105,25 +106,22 @@ Harness 中的上下文架构由两部分组成：
 | BOOTSTRAP.md | Agent 引导信息 |
 | HEARTBEAT.md | 定期检测清单 |
 
-**AI Coder** 则需要针对代码任务增加专项配置，加载的内容更为丰富：
+**AI Coder** 则需要针对代码任务增加专项配置，加载的内容更为丰富，这里参考了 Cluade Code 的系统提示词设计：
 
 | 类型 | 说明 |
 |------|------|
-| 任务执行哲学 | 在软件工程语境下理解指令，遵循务实实践：先读后改、少创建文件、不估算时间、注意安全；避免过早抽象、不必要的添加和错误处理 |
-| 操作安全与风险治理 | 评估操作可逆性和影响范围；可自由执行本地可逆操作；对破坏性操作（影响共享系统、难以逆转）需用户确认；不以破坏性操作作为捷径；仅协助授权安全测试和防御性安全 |
-| Sub-Agent 架构与委派 | fork 用于中间输出不值得保留的场景（共享缓存、不窥视、不竞赛、简洁指令）；编写子代理提示词时区分继承上下文与全新子代理；worker 应精确实现、测试、报告结果、不假设；跨对话构建领域特定内存知识；线程使用绝对路径、一致格式、无 emoji |
-| 工具选择与使用策略 | 优先使用专用工具（Read / Glob / Grep / Edit / Write）而非 Bash；简单定向搜索用 Glob / Grep；复杂探索用 Task；斜杠命令通过 Skill；用 TodoWrite 追踪进度；Bash 专用于系统命令 |
-| 输出规范 | 引用代码包含 `file_path:line_number`；保持响应简短简洁；先回答后推理；独立操作使用并行工具调用 |
+| 任务执行原则 | 在软件工程语境下理解指令，遵循务实实践：先读后改、少创建文件、不估算时间、注意安全|
+| 操作安全与风险治理 | 评估操作可逆性和影响范围：可自由执行本地可逆操作；对破坏性操作（删除文件）需用户确认|
+| Sub-Agent | 编写子代理提示词时区分继承上下文与全新子代理；worker 应精确报告结果，不做假设；线程使用绝对路径、一致格式、无 emoji |
+| 工具选择与使用策略 | 优先使用专用工具（Read / Glob / Grep / Edit / Write）而非 Bash；简单定向搜索用 Glob / Grep；复杂探索用 Task；斜杠命令通过 Skill |
+| 输出规范 | 引用代码包含 `file_path:line_number`；保持响应简短简洁；先回答后推理 |
 | 功能模式 | **Auto Mode**：立即执行、最小化中断、优先行动、预期修正、破坏性操作需确认；**Learning Mode**：协作鼓励，要求用户贡献 2-10 行设计决策代码 |
-| 上下文压缩与内存管理 | 生成捕获基本上下文的结构化摘要以减少 token；部分压缩时保留：完成内容、关键决策、当前状态、下一步 |
+| 上下文压缩与内存管理 | 压缩时保留完成内容、关键决策、当前状态、下一步操作等 |
 | 专项能力与工具指令 | Git 状态为时间快照不更新；Scratchpad 用于中间文件和临时制品；MCP 长输出用直接查询或子代理分析 |
 | 安全监控 | 审查用户定义的自动模式规则；根据阻止/允许规则评估自主代理操作 |
 | 环境特定 | PowerShell 5.1 信息；避免不必要 sleep 命令 |
 | 协作与通信 | Swarm 中的队友通信协议 |
-| 计划模式 | 计划模式第四阶段；远程计划模式注入提醒，探索代码库、生成图表计划并实现 |
-| 高级功能 | 会话转换为技能；hooks 配置 |
-| 限制处理 | 工具执行被拒绝时的系统提示词 |
-| 工具特定 | Chrome 浏览器 MCP 工具加载；浏览器自动化工具使用规范 |
+| 计划模式 | 探索代码库、生成图表计划并实现 |
 
 #### 2.1.2 模块加载顺序
 
@@ -142,7 +140,7 @@ LLM 的 KV Cache 基于**位置**进行复用。当模型看到"第 100 个 toke
 | 优先级 | 内容 | 理由 |
 |--------|------|------|
 | ★★★ | 身份定义 | Agent 的角色定位是最核心的标识，几乎不变 |
-| ★★★ | 任务执行哲学 | AI Coder 的核心做事原则，一旦确立很少改动 |
+| ★★★ | 任务执行原则 | AI Coder 的核心做事原则，一旦确立很少改动 |
 | ★★★ | 操作安全与风险治理 | 安全规则是底线，稳定性优先 |
 | ★★★ | 输出规范 | 代码引用格式、响应风格等规范一旦约定就不变 |
 | ★★☆ | 语气和风格 | Agent 输出原则相对稳定 |
@@ -178,9 +176,9 @@ LLM 的 KV Cache 基于**位置**进行复用。当模型看到"第 100 个 toke
 │  TOP（高缓存命中率）                                        │
 │  ────────────────────────────────────────────────────────  │
 │  身份定义                                                   │
-│  任务执行哲学                                               │
+│  任务执行原则                                               │
 │  操作安全与风险治理                                         │
-│  Sub-Agent 架构与委派                                       │
+│  Sub-Agent                                                │
 │  工具选择与使用策略                                         │
 │  输出规范                                                  │
 │  语气和风格                                                │
@@ -189,26 +187,27 @@ LLM 的 KV Cache 基于**位置**进行复用。当模型看到"第 100 个 toke
 ├─────────────────────────────────────────────────────────────┤
 │  BOTTOM（低缓存命中率）                                      │
 │  ────────────────────────────────────────────────────────  │
-│  功能模式（当前是 Auto Mode）                               │
-│  当前任务状态（实现 X 功能，进度 60%）                      │
-│  MEMORY.md（用户偏好：不要用 Redux）                        │
-│  工具执行结果（最近的 grep / Read 输出）                    │
+│  功能模式                                                   │
+│  当前任务状态）                                             │
+│  MEMORY.md                                                 │
+│  工具执行结果                                               │
 │  Scratchpad 内容                                           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 这种分层加载策略让 **80% 的稳定内容享受高缓存命中率，仅 20% 的动态内容每次重新计算**，在保证 Agent 理解能力的同时最大化成本效率。
 
-### 2.2 四级上下文压缩管线
+### 2.2 上下文压缩
 
-上下文压缩解决**上下文超出LLM上下文窗口限制、Agent 记忆退化和Agent 在上下文过长时出现的焦虑行为**。上下文压缩并不是单一的LLM处理，而是一个**多层级递进式的压缩流水线**。根据令牌压力的严重程度以及待清理数据的具体特性，在三个压缩层级之间进行切换。
+上下文压缩解决**上下文超出LLM上下文窗口限制、Agent 记忆退化和Agent 在上下文过长时出现的焦虑行为**。上下文压缩并不是单一的LLM处理，而是一个**多层级递进式的压缩流水线**。
 
-1. **Microcompact** - 每次请求前的轻量级工具结果清理
-2. **Session Memory compaction** - 自动压缩时优先尝试的会话内存摘要
-3. **Full compaction** - 完整对话摘要
+1. **微压缩（Microcompact）** - 根据工具白名单清理工具输出
+2. **会话记忆压缩（Session Memory compaction）** - 利用结构化的会话记忆替换历史会话消息
+3. **Full compaction** - 调用 LLM 生成会话摘要
 
-#### 2.2.1 微压缩 (`microcompact`) — 每次请求
-> 微压缩在每次 API 调用前执行，按工具类型白名单，保留最近N个工具结果，把更早的结果清理掉。这些工具输出通常很大但是时效性很短。优势在于零 API 调用，成本低。
+
+#### 2.2.1 微压缩 (`microcompact`)
+> 微压缩在每次 API 调用前执行，按工具类型白名单，保留最近N个工具结果，把更早的结果清理掉,这些工具输出通常很大但是时效性很短。优势在于零 API 调用，成本低。
 - **工具白名单**
     - FileRead
     - Bash
@@ -226,35 +225,35 @@ LLM 的 KV Cache 基于**位置**进行复用。当模型看到"第 100 个 toke
    - 用户离开一段时间后失效
    - 当距上次助手消息的时间超过阈值（默认60分钟）时触发
    - 服务器端缓存已过期，清空旧工具结果内容，保留最近 N 个
-   - 直接修改消息内容，将工具调用结果直接替换为 `[{tool_name} used]`
+   - 直接修改消息内容，将工具调用结果直接替换为占位符
 
 2. **缓存微压缩** 
    - 用户连续会话中生效
-   - 使用 `cache_edits` API 删除工具结果
-   - **不修改**本地消息内容
+   - 服务端删除工具结果，不修改本地消息内容
    - 保持缓存前缀有效，避免重写
    - 只对主线程生效，不删除子Agent的工具结果
 
-#### 2.2.2 会话记忆压缩 (`sessionMemoryCompact`) — 自动压缩优先尝试
+#### 2.2.2 会话记忆压缩 (`sessionMemoryCompact`)
 > 微压缩是删除工具结果保留提示词前缀，会话记忆压缩是提取结构化事实(项目结构、用户偏好、任务进度)持久化到记忆文件。优势在于零API调用，用已经提取的结构化记忆替代摘要，成本低，且保留最近原始消息的完整细节。
-1. 检查 `lastSummarizedMessageId` 确定已摘要的消息边界
-2. 计算需要保留的消息起始索引，同时满足最小Tokens和最小消息数，或最大Tokens
-3. 调整索引以保持 `tool_use/tool_result` 配对完整
+
+1. 检查 `lastSummarizedMessageId` 确定上一次摘要的消息边界
+2. 计算需要保留的消息起始索引，向上扩展会话记录，同时满足最小Tokens和最小消息数，或最大Tokens
+3. 调整索引保持 `tool_use/tool_result` 配对完整
 4. 使用会话记忆内容作为摘要
 
-#### 2.2.3 完整压缩 (`compactConversation`) — 传统摘要压缩
+#### 2.2.3 完整压缩 (`compactConversation`)
 
-> 当会话记忆压缩不可用或不够用时触发，调用 API 生成对话摘要，创建压缩边界标记。
+> 当会话记忆压缩不可用或不够用时触发，调用LLM生成对话摘要，创建压缩边界标记。
 
 **压缩流程**：
 
 1. 剥离图像（避免压缩请求本身超长）
-2. 调用模型按照**用户请求和意图、关键技术概念、文件和代码片段、错误和修复、问题解决过程、所用用户消息、待办任务、当前工作和可选的下一步**生成对话摘要，输出格式要求包含'<analysis>'和'<summary>'标签，<analysis>标签的作用是让模型在生成摘要之前**想清楚**，但实际仅提取<summary>标签内容
+2. 调用LLM按照**用户请求和意图、关键技术概念、文件和代码片段、错误和修复、问题解决过程、所用用户消息、待办任务、当前工作和可选的下一步**生成对话摘要，输出格式要求包含'<analysis>'和'<summary>'标签，<analysis>标签的作用是让模型在生成摘要之前**想清楚**，<summary>标签输出摘要，提取时仅提取<summary>标签中的内容。
 3. 清除文件状态缓存
 6. 创建压缩边界标记
 7. 生成摘要消息
 8. 创建压缩后附件（文件状态、工具增量等）
-9. 重新注入最近文件（<= 5个 or 5w tokens）、Plan 文件、Skill 内容、MCP 工具说明、Agent 列表
+9. 重新注入最近文件（<= 5个 或 <= 5w tokens）、Plan 文件、Skill 内容、MCP 工具说明、Agent 列表
 
 ## 三、在 Good Harness 中的实践:上下文架构
 本节将详细介绍 Good Harness 中的上下文架构实践。我们将从整体代码文件结构，快速启动指南，核心数据类定义，提示词加载和上下文压缩依此介绍。
@@ -282,15 +281,13 @@ code/
 │   ├── __init__.py
 │   ├── api_context.py               # API 上下文管理
 │   ├── compaction.py                # 完整压缩实现
-│   ├── grouping.py                  # 消息分组
 │   ├── microcompact.py             # 微压缩实现
 │   ├── models.py                    # 数据模型
 │   ├── prompt.py                    # 压缩提示词
 │   ├── session_memory.py           # 会话记忆压缩
 │   ├── token_estimation.py         # Token 估算
-│   └── test_compact.py             # 测试
 │
-├── template/                        # 模板目录
+├── template/                        # 预设的skill模版
 │   ├── docx/
 │   ├── pdf/
 │   ├── pptx/
@@ -320,20 +317,20 @@ code/
 ## 3.2 快速启动
 1. cd 到 `01_agent module/context/code` 目录下
 2. 创建一个名为 `.env` 的文件，并添加以下内容：
-```bash
-ANTHROPIC_API_KEY="<your_api_key>"
-ANTHROPIC_BASE_URL="<base_url>"
-MODEL_ID="<model_name>"
-```
-**注:目前仅支持兼容 Anthropic API 的模型，您可以使用 `minimax` `glm` `kimi`等。**
+    ```bash
+    ANTHROPIC_API_KEY="<your_api_key>"
+    ANTHROPIC_BASE_URL="<base_url>"
+    MODEL_ID="<model_name>"
+    ```
+- 注:目前仅支持兼容 Anthropic API 的模型，您可以使用 `minimax` `glm` `kimi`等。
 3. 下载依赖包
-```bash
-pip install -r requirements.txt
-```
+    ```bash
+    pip install -r requirements.txt
+    ```
 4. 运行程序
-```bash
-python runtime.py
-```
+    ```bash
+    python runtime.py
+    ```
 
 ## 3.3 核心数据类定义
 
@@ -342,7 +339,7 @@ python runtime.py
 
 ### 3.3.1 消息类（核心数据结构）
 
-`Message` 是最核心的数据类，它用于定义模型接收和返回的消息，最简单的只需要 role 和 content 属性，但为了辅助上下文压缩，我们添加了额外的属性 `id` 和 `timestamp` 。
+`Message` 是最核心的数据类，用于定义接受和返回消息的数据结构。
 
 ```python
 @dataclass
@@ -362,16 +359,16 @@ class Message:
 
     def is_assistant(self) -> bool:
         """判断是否是对话助手的消息"""
-        return self.role == "assistant" or self.type == "assistant"
+        return self.role == "assistant"
 
     def is_user(self) -> bool:
         """判断是否是用户的消息"""
-        return self.role == "user" or self.type == "user"
+        return self.role == "user"
 ```
 
 ### 3.3.2 压缩元数据类
 
-**`CompactMetadata`** - 记录压缩操作的信息：
+**`CompactMetadata`** - 定义压缩操作的数据结构：
 
 ```python
 @dataclass
@@ -381,7 +378,7 @@ class CompactMetadata:
     last_message_uuid: str = ""  # 最后一条消息的 UUID
 ```
 
-**`CompactionResult`** - 记录压缩操作的结果：
+**`CompactionResult`** - 定义压缩操作结果的数据结果：
 
 ```python
 @dataclass
@@ -439,7 +436,8 @@ _BASE_SYSTEM_PROMPT = """
 
 ### 3.4.2 身份定义
 
-身份定义告诉 Agent "它是谁"。有两种预设身份：通用Agent（类似Openclaw）和AI Coder（类似 Claude Code）：
+身份定义告诉 Agent "它是谁"。<br>
+有两种预设身份：通用Agent（类似Openclaw）和AI Coder（类似 Claude Code）：
 
 **通用 Agent 身份**：
 ```python
@@ -490,7 +488,7 @@ def build_runtime_system_prompt(
         workspace_structure=_build_workspace_structure(cwd),
         environment=format_environment_section(get_environment_info(cwd)),
         skills=build_skills_body(cwd),
-        memory=get_mermory_section(cwd),  # 注意：函数名有拼写错误（mermory）
+        memory=get_mermory_section(cwd), 
         agents=get_agents_section(cwd),
     ) + "\n\n" + specific
 ```
@@ -546,11 +544,12 @@ flowchart TD
 |----------|----------|----------|
 | **🔷 身份模块** | Identity（通用 Agent 或 AI Coder） | 通用 |
 | **基础模块** | Tools Use Guidelines、Tone and Style、Security、Workspace Structure、Environment、Memory、CLAUDE/AGENTS | 通用 |
-| **💜 Agent 个性化** | SOUL.md、USER.md、BOOTSTRAP.md、HEARTBEAT.md | agent |
-| **💙 AI Coder 专属** | 任务执行哲学、操作安全与风险治理、工具选择策略、输出规范等 | coder |
+| **💜 Agent 个性化** | SOUL.md、USER.md、BOOTSTRAP.md、HEARTBEAT.md | 个人助手 |
+| **💙 AI Coder 专属** | 任务执行原则、操作安全与风险治理、工具选择策略、输出规范等 | 编程助手 |
 
 ### 3.4.4 工作空间结构描述
-在系统提示词中添加工作空间结构描述，让 Agent 明确知道可用资源的位置（如 skills/ 加载技能、workspace/MEMORY.md 持久化偏好）、文件应存放的位置，以及哪些可选配置尚未创建，从而避免 Agent 随意命名文件路径、不知道去哪读写数据，确保Agent行为符合项目规范。
+
+在系统提示词中添加工作空间结构描述，让 Agent 明确知道可用资源的位置（如 skills/ 加载技能、workspace/MEMORY.md 持久化偏好）、文件应存放的位置，从而避免 Agent 不知道去哪读写数据。
 
 `_build_workspace_structure()` 函数生成工作空间的目录结构说明：
 
@@ -588,7 +587,7 @@ def _build_workspace_structure(cwd: Path = None) -> str:
 
 ### 3.4.5 技能加载
 
-技能（Skills）为 Agent 扩展专业能力，缓解上下文爆炸的问题，每一个 skill 对应一个 `SKILL.md` 文件，该文件由元数据和正文组成，元数据提供了skill 的名称、描述、依赖配置，在系统提示词加载时会扫描所有的 `SKILL.md` 文件，获取元数据并组装成 xml 块，xml 块的优势在于易于解析和动态替换。
+技能（Skills）为 Agent 扩展专业能力，缓解上下文爆炸的问题，每一个 skill 对应一个 `SKILL.md` 文件，该文件由元数据和正文组成，元数据提供了skill 的名称、描述、依赖配置，在系统提示词加载时会扫描所有的 `SKILL.md` 文件，获取元数据并组装成 xml 块。
 
 `build_skills_body()` 函数扫描 `skills/` 目录，加载所有 `SKILL.md` 文件：
 
@@ -637,7 +636,7 @@ def build_skills_body(cwd: Path = None):
     ] + ["</skills>"])
 ```
 
-### 3.4.6 个性化提示词（Agent 类型）
+### 3.4.6 个性化提示词
 
 对于 `agent` 类型的 Agent，还有额外的个性化提示词：
 
@@ -721,9 +720,9 @@ class EnvironmentInfo:
 
 ## 3.5 上下文压缩
 
-上下文压缩解决模型上下文窗口限制，避免上下文腐蚀的关键机制。Good Harness 实现了**四级递进式压缩管线**。
+上下文压缩解决模型上下文窗口限制，避免上下文腐蚀的关键机制。Good Harness 实现了**三级递进式压缩管线**。
 
-### 3.5.1 压缩管线概览
+### 3.5.1 压缩管线
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -736,7 +735,6 @@ class EnvironmentInfo:
 │  - 时机: 每次 API 调用前                                 │
 │  - 成本: 零 API 调用                                     │
 │  - 原理: 基于时间间隔清理旧工具结果                       │
-│  - 实现: 两种路径——时间触发 vs 缓存触发                  │
 └─────────────────────────────────────────────────────────┘
                           │
                           ▼
@@ -826,11 +824,11 @@ def evaluate_time_based_trigger(messages, query_source=None):
     return {"gap_minutes": gap_minutes, "config": config}
 ```
 
-**清理逻辑**：
+**实现**：
 
 ```python
 def maybe_time_based_microcompact(messages, query_source=None):
-    """执行时间-based 微压缩"""
+    """执行基于时间的微压缩"""
     trigger = evaluate_time_based_trigger(messages, query_source)
     if not trigger:
         return None
@@ -855,7 +853,7 @@ def maybe_time_based_microcompact(messages, query_source=None):
             return block
         return {**block, "content": TIME_BASED_MC_CLEARED_MESSAGE}
 
-    # 遍历消息，应用清理（保持不可变性）
+    # 遍历消息，清理工具结果
     result = []
     for msg in messages:
         content = msg.get("content", []) if isinstance(msg, dict) else getattr(msg, "content", [])
@@ -876,19 +874,20 @@ def maybe_time_based_microcompact(messages, query_source=None):
 
 ### 3.5.3 Tier 2：会话记忆压缩
 
-会话记忆压缩位于 `compact/session_memory.py`，利用预提取的结构化事实来替代原始消息。会话记忆通过后台Agent预先提取并持久化到文件，压缩时直接使用，无需调用 API。
+会话记忆压缩位于 `compact/session_memory.py`，利用预提取的结构化事实来替代原始消息。会话记忆通过后台Agent预先提取并持久化到文件，压缩时直接使用，无需调用LLM。
+
 **压缩流程**：
 1. 预先提取结构化事实
-1.1 每轮会话结束，计算Tokens用量
-1.2.1 初始化会话记忆文件需满足 Tokens>=20000
-1.2.2 更新会话记忆文件需满足 Tokens>=5000 且 工具调用次数 >= 10
-1.3 启动后台Agent抽取结构化事实并保存到 `./harness/data/memory` 目录下
+    - 1.1 每轮会话结束，计算Tokens用量
+    - 1.2.1. 初始化会话记忆文件需满足 Tokens>=20000
+    - 1.2.2 更新会话记忆文件需满足 Tokens>=5000 且 工具调用次数 >= 10
+    - 1.3 启动后台Agent抽取结构化事实并保存到 `./harness/data/memory` 目录下
 2. 会话记忆压缩
-2.1 读取会话记忆文件
-2.2 从会话记忆文件中获取最后一条消息的ID
-2.3 从该消息向上扩展，直到同时满足最小Tokens和最小消息数，或超过最大Tokens，保留最近N条消息
-2.4 将历史消息替换成会话摘要并重新注入最近N条消息
-2.5 返回压缩后的结果
+    - 2.1 读取会话记忆文件
+    - 2.2 从会话记忆文件中获取最后一条消息的ID
+    - 2.3 从该消息向上扩展，直到同时满足最小Tokens和最小消息数，或超过最大Tokens，保留最近N条消息
+    - 2.4 将历史消息替换成会话摘要并重新注入最近N条消息
+    - 2.5 返回压缩后的结果
 
 
 **会话记忆数据结构**：
@@ -1277,7 +1276,7 @@ def adjust_index_to_preserve_pairs(messages, start_index):
 
 压缩提示词包含 9 个方面的考量，要求输出结构包含 `<analysis>` 和 `<summary>` 标签：
 
-| # | 摘要字段 | 核心内容 | 设计目的 |
+|  | 摘要字段 | 核心内容 | 设计目的 |
 |---|----------|---------|---------|
 | 1 | Primary Request and Intent | 用户的明确请求与目标 | 防止目标偏移 |
 | 2 | Key Technical Concepts | 技术、框架、模式、语言特性 | 提供定位锚点 |
@@ -1371,18 +1370,18 @@ async def compact_conversation(
 ```python
 def agent_loop(messages: list, session_id: str):
     while True:
-        # BEFORE API CALL: Apply microcompact (Tier 1)
+        # 微压缩
         messages = microcompact_messages(messages, query_source="repl_main_thread")
 
         token_count = rough_token_count_estimation_for_messages(messages)
 
-        # Check if higher-tier compaction is needed
+
         if token_count >= COMPACTION_THRESHOLD:
             print(f"[Compaction: ~{token_count} tokens, threshold {COMPACTION_THRESHOLD}]")
-            # Try session memory first (Tier 2, zero cost)
+            # 会话记忆压缩
             compacted = try_session_memory_compaction(messages, session_id)
             if compacted is None:
-                # Full compaction via LLM (Tier 3)
+                # 完整压缩
                 compacted = asyncio.run(compact_conversation(messages, client,MODEL))
             if compacted:
                 messages = compacted
@@ -1426,7 +1425,7 @@ class CompactionState:
         self.last_assistant_timestamp = 0  # 最后助手消息时间
 ```
 
-### 3.5.10 四级压缩管线总结
+### 3.5.10 三级压缩管线总结
 
 | Tier | 名称 | 触发时机 | API 成本 | 实现文件 |
 |------|------|---------|---------|---------|
@@ -1435,8 +1434,8 @@ class CompactionState:
 | 3 | Full Compaction | Tier 2 不可用时 | 一次 | `compaction.py` |
 
 **设计原则**：
-- **低成本优先**：优先使用零成本的 Tier 1/2/4
-- **渐进式压缩**：层层递进，先清理后摘要
-- **信息保留**：摘要保留关键决策和下一步，而非简单截断
+- **低成本优先**：优先使用零成本的 Tier 1/2
+- **渐进式压缩**：层层递进，先用微压缩清理工具结果再尝试会话记忆压缩，最后尝试完整压缩
+- **信息保留**：摘要保留关键决策和下一步
 - **不可变性**：所有压缩操作保持消息对象不可变
 - **配对完整**：确保 tool_use/tool_result 不被拆分
